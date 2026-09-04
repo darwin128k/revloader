@@ -147,6 +147,8 @@ static void TeardownSteamIpc(SteamIpc *ipc)
     memset(ipc, 0, sizeof(*ipc));
 }
 
+#define DEFAULT_STEAM_APPID "10"
+
 static int ReadSteamAppId(const char *dir, char *out, size_t outSize)
 {
     char path[MAX_PATH];
@@ -165,6 +167,26 @@ static int ReadSteamAppId(const char *dir, char *out, size_t outSize)
         out[--n] = '\0';
     }
     return n > 0;
+}
+
+/* hw.dll unlinks steam_appid.txt when SteamAppId is already in the
+ * environment (Steam-style launch). Rewrite it so the next start still
+ * has an AppId without a warning dialog. */
+static void WriteSteamAppId(const char *dir, const char *appId)
+{
+    char path[MAX_PATH];
+    FILE *f;
+
+    if (appId == NULL || appId[0] == '\0') {
+        return;
+    }
+    JoinPath(path, sizeof(path), dir, "steam_appid.txt");
+    f = fopen(path, "w");
+    if (f == NULL) {
+        return;
+    }
+    fprintf(f, "%s\n", appId);
+    fclose(f);
 }
 
 static int RunChild(char *cmdLine)
@@ -248,16 +270,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
     }
 
     if (appId[0] == '\0' && !ReadSteamAppId(dir, appId, sizeof(appId))) {
-        MessageBoxA(NULL,
-                    "No steam_appid.txt detected, the game might not launch correctly",
-                    "Warning",
-                    MB_OK | MB_ICONWARNING);
+        strncpy(appId, DEFAULT_STEAM_APPID, sizeof(appId) - 1);
+        appId[sizeof(appId) - 1] = '\0';
     }
 
-    if (appId[0] != '\0') {
-        SetEnvironmentVariableA("SteamGameId", appId);
-        SetEnvironmentVariableA("SteamAppId", appId);
-    }
+    SetEnvironmentVariableA("SteamGameId", appId);
+    SetEnvironmentVariableA("SteamAppId", appId);
+    WriteSteamAppId(dir, appId);
 
     iniClient[0] = '\0';
     GetPrivateProfileStringA("Loader", "SteamClientDll", "", iniClient, sizeof(iniClient), iniPath);
@@ -296,10 +315,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
     WriteActiveProcess(GetCurrentProcessId(), steamClient);
 
     if (!RunChild(procName)) {
+        WriteSteamAppId(dir, appId);
         TeardownSteamIpc(&ipc);
         return 1;
     }
 
+    WriteSteamAppId(dir, appId);
     TeardownSteamIpc(&ipc);
     return 0;
 }

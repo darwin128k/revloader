@@ -7,7 +7,7 @@
 ## Что делает
 
 1. Читает командную строку (`-launch`, `-appid`) и `rev.ini` (`[Loader] ProcName`, по умолчанию `hl.exe -game cstrike`).
-2. Берёт AppId из `-appid` или `steam_appid.txt`, выставляет `SteamAppId` / `SteamGameId`.
+2. Берёт AppId из `-appid`, иначе `steam_appid.txt`, иначе `10`. Ставит `SteamAppId` / `SteamGameId` и **перезаписывает** `steam_appid.txt` до старта и после выхода: `hw.dll` удаляет файл, если env уже задан.
 3. Создаёт Steam IPC: `Local\SteamStart_SharedMemFile`, `Local\SteamStart_SharedMemLock`.
 4. Грузит `steam.dll` **в процесс лоадера** (x86).
 5. Пишет `HKCU\Software\Valve\Steam\ActiveProcess`: живой `pid` лоадера и путь к `steamclient.dll` (интерфейс `SteamClient012`).
