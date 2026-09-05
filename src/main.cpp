@@ -10,7 +10,9 @@
 
 /* RevEmu loader for cstrike.exe. Default: set up Steam and CreateProcess
  * ProcName (hl.exe). With REVLOADER_STANDALONE: same Steam setup, then run
- * GoldSrc in this process via hl's HlLauncher_Run (sources from -DHL_DIR). */
+ * GoldSrc in this process via hl's HlLauncher_Run (sources from -DHL_DIR).
+ * With REVLOADER_LAUNCHER_DLLS, optional [Loader] Dlls= in rev.ini is
+ * forwarded as repeated -dll flags. */
 
 #define STEAM_IPC_MAPPING_NAME "Local\\SteamStart_SharedMemFile"
 #define STEAM_IPC_EVENT_NAME   "Local\\SteamStart_SharedMemLock"
@@ -67,6 +69,124 @@ static void AppendArg(char *cmd, size_t cmdSize, const char *arg)
     _snprintf(cmd + n, cmdSize - n, "%s", arg);
     cmd[cmdSize - 1] = '\0';
 }
+
+#ifdef REVLOADER_LAUNCHER_DLLS
+static const char *SkipSpaces(const char *p)
+{
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    return p;
+}
+
+static const char *NextToken(const char *p, char *out, size_t outSize)
+{
+    size_t n = 0;
+
+    p = SkipSpaces(p);
+    if (*p == '\0') {
+        out[0] = '\0';
+        return p;
+    }
+    if (*p == '"') {
+        p++;
+        while (*p != '\0' && *p != '"' && n + 1 < outSize) {
+            out[n++] = *p++;
+        }
+        if (*p == '"') {
+            p++;
+        }
+    } else {
+        while (*p != '\0' && *p != ' ' && *p != '\t' && n + 1 < outSize) {
+            out[n++] = *p++;
+        }
+    }
+    out[n] = '\0';
+    return p;
+}
+
+static int DllNameIsSafe(const char *name)
+{
+    size_t len;
+    const char *p;
+
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (p = name; *p != '\0'; p++) {
+        if (*p == '/' || *p == '\\' || *p == ':' || *p == '"' || *p == '\'') {
+            return 0;
+        }
+    }
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+        return 0;
+    }
+    if (strstr(name, "..") != NULL) {
+        return 0;
+    }
+    len = strlen(name);
+    if (len < 5 || _stricmp(name + len - 4, ".dll") != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int CmdlineHasDll(const char *cmd, const char *name)
+{
+    const char *p = cmd;
+    char tok[MAX_PATH];
+    char got[MAX_PATH];
+
+    while (*p != '\0') {
+        p = NextToken(p, tok, sizeof(tok));
+        if (tok[0] == '\0') {
+            break;
+        }
+        if (_stricmp(tok, "-dll") != 0) {
+            continue;
+        }
+        p = NextToken(p, got, sizeof(got));
+        if (_stricmp(got, name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int AppendDllsFromIni(char *cmd, size_t cmdSize, const char *iniPath)
+{
+    char list[1024];
+    char name[MAX_PATH];
+    const char *p;
+    size_t n;
+
+    GetPrivateProfileStringA("Loader", "Dlls", "", list, sizeof(list), iniPath);
+    p = list;
+    for (;;) {
+        while (*p == ' ' || *p == '\t' || *p == ',' || *p == ';') {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        n = 0;
+        while (*p != '\0' && *p != ' ' && *p != '\t' && *p != ',' && *p != ';' && n + 1 < sizeof(name)) {
+            name[n++] = *p++;
+        }
+        name[n] = '\0';
+        if (!DllNameIsSafe(name)) {
+            Fail("Invalid Dlls entry in rev.ini (basename only, .dll in the game folder).");
+            return 0;
+        }
+        if (CmdlineHasDll(cmd, name)) {
+            continue;
+        }
+        AppendArg(cmd, cmdSize, "-dll");
+        AppendArg(cmd, cmdSize, name);
+    }
+    return 1;
+}
+#endif
 
 static int HasArg(const char *cmd, const char *arg)
 {
@@ -371,6 +491,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
         if (!HasArg(engineCmd, "-game")) {
             AppendArg(engineCmd, sizeof(engineCmd), "-game cstrike");
         }
+#ifdef REVLOADER_LAUNCHER_DLLS
+        if (!AppendDllsFromIni(engineCmd, sizeof(engineCmd), iniPath)) {
+            WriteSteamAppId(dir, appId);
+            TeardownSteamIpc(&ipc);
+            return 1;
+        }
+#endif
         rc = HlLauncher_Run(instance, engineCmd);
         WriteSteamAppId(dir, appId);
         TeardownSteamIpc(&ipc);
@@ -383,6 +510,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
         TeardownSteamIpc(&ipc);
         return 1;
     }
+#ifdef REVLOADER_LAUNCHER_DLLS
+    if (!AppendDllsFromIni(procName, sizeof(procName), iniPath)) {
+        WriteSteamAppId(dir, appId);
+        TeardownSteamIpc(&ipc);
+        return 1;
+    }
+#endif
     if (!RunChild(procName)) {
         WriteSteamAppId(dir, appId);
         TeardownSteamIpc(&ipc);

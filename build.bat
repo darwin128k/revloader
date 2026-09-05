@@ -10,23 +10,38 @@ if errorlevel 1 (
 )
 
 set STANDALONE=OFF
+set LAUNCHER_DLLS=ON
 set "HL_DIR="
+
+:parse_args
+if "%~1"=="" goto args_done
 if /I "%~1"=="standalone" (
     set STANDALONE=ON
-    if "%~2"=="" (
-        set "HL_DIR=%~dp0..\hl"
-    ) else (
-        set "HL_DIR=%~2"
-    )
+    shift
+    goto parse_args
 )
+if /I "%~1"=="nodll" (
+    set LAUNCHER_DLLS=OFF
+    shift
+    goto parse_args
+)
+if "%STANDALONE%"=="ON" if "%HL_DIR%"=="" (
+    set "HL_DIR=%~1"
+    shift
+    goto parse_args
+)
+echo Unknown argument: %~1
+exit /b 1
+:args_done
+if "%STANDALONE%"=="ON" if "%HL_DIR%"=="" set "HL_DIR=%~dp0..\hl"
 
 if not exist build mkdir build
 cd build
 
 if "%STANDALONE%"=="ON" (
-    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=ON -DHL_DIR="%HL_DIR%" ..
+    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=ON -DREVLOADER_LAUNCHER_DLLS=%LAUNCHER_DLLS% -DHL_DIR="%HL_DIR%" ..
 ) else (
-    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=OFF ..
+    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=OFF -DREVLOADER_LAUNCHER_DLLS=%LAUNCHER_DLLS% ..
 )
 if errorlevel 1 (
     echo CMake configure failed
@@ -65,8 +80,8 @@ if errorlevel 1 (
 )
 
 if "%STANDALONE%"=="ON" (
-    echo Build OK: standalone cstrike.exe ^(GoldSrc in-process, hl from %HL_DIR%^)
+    echo Build OK: standalone cstrike.exe ^(GoldSrc in-process, hl from %HL_DIR%, REVLOADER_LAUNCHER_DLLS=%LAUNCHER_DLLS%^)
 ) else (
-    echo Build OK: revloader cstrike.exe -^> game root
+    echo Build OK: revloader cstrike.exe -^> game root ^(REVLOADER_LAUNCHER_DLLS=%LAUNCHER_DLLS%^)
 )
 endlocal
