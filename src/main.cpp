@@ -279,7 +279,7 @@ static int SetupSteamIpc(SteamIpc *ipc)
         return 0;
     }
 
-    ipc->lockEvent = CreateEventA(NULL, FALSE, FALSE, STEAM_IPC_EVENT_NAME);
+    ipc->lockEvent = CreateEventA(NULL, TRUE, FALSE, STEAM_IPC_EVENT_NAME);
     if (ipc->lockEvent == NULL) {
         char msg[128];
         _snprintf(msg, sizeof(msg), "Unable to CreateEvent: %i", (int)GetLastError());
@@ -289,6 +289,12 @@ static int SetupSteamIpc(SteamIpc *ipc)
         memset(ipc, 0, sizeof(*ipc));
         return 0;
     }
+
+    /* Real Steam signals this once its bootstrap/IPC state is ready; code
+     * that waits on it (steam_api/steamclient init) blocks until it is set.
+     * We are the "Steam is up" stand-in, so signal it immediately -- manual-
+     * reset so every later waiter (not just the first) sees it as ready. */
+    SetEvent(ipc->lockEvent);
 
     return 1;
 }
@@ -481,7 +487,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
 #ifdef REVLOADER_STANDALONE
     {
         char engineCmd[4096];
+        char rawCmdLine[4096];
         int rc;
+
+        _snprintf(rawCmdLine, sizeof(rawCmdLine), "%s", GetCommandLineA());
+        rawCmdLine[sizeof(rawCmdLine) - 1] = '\0';
 
         _snprintf(engineCmd, sizeof(engineCmd), "%s", GetCommandLineA());
         engineCmd[sizeof(engineCmd) - 1] = '\0';
@@ -498,6 +508,36 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
             return 1;
         }
 #endif
+
+        /* If this process's own OS-level command line has no -game (the
+         * normal case: user double-clicked cstrike.exe with no arguments),
+         * running the engine in this same process leaves GetCommandLineA()
+         * without -game. Code inside hw.dll/steam_api that reads the real
+         * process command line directly -- not the string we pass to
+         * engine->Run() below -- then sees no mod and falls back to the
+         * base game's "valve" paths for some things (observed: downloaded
+         * maps landing in valve_downloads instead of cstrike_downloads,
+         * so the engine never finds them and re-downloads every time).
+         * Fix: re-exec ourselves with the real, full command line so the
+         * process that actually runs the engine has -game in its true
+         * argv, and just wait for that one. */
+        if (!HasArg(rawCmdLine, "-game")) {
+            char selfPath[MAX_PATH];
+            char selfCmd[4096];
+
+            GetModuleFileNameA(NULL, selfPath, sizeof(selfPath));
+            selfPath[sizeof(selfPath) - 1] = '\0';
+
+            _snprintf(selfCmd, sizeof(selfCmd), "\"%s\"", selfPath);
+            selfCmd[sizeof(selfCmd) - 1] = '\0';
+            AppendLaunchTail(selfCmd, sizeof(selfCmd), engineCmd);
+
+            rc = RunChild(selfCmd) ? 0 : 1;
+            WriteSteamAppId(dir, appId);
+            TeardownSteamIpc(&ipc);
+            return rc;
+        }
+
         rc = HlLauncher_Run(instance, engineCmd);
         WriteSteamAppId(dir, appId);
         TeardownSteamIpc(&ipc);
