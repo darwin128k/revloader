@@ -4,13 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Temporary replacement for this install's cstrike.exe (RevEmu RevLoader,
- * 2014). Not part of vellum -- disposable once a real overlay launcher exists.
- *
- * hl.exe is the game process. This exe sets up RevEmu (steam.dll + IPC +
- * ActiveProcess registry) and CreateProcess's ProcName from rev.ini
- * (default: "hl.exe -game cstrike"). Must stay 32-bit and alive until hl.exe
- * exits. */
+#ifdef REVLOADER_STANDALONE
+#include "launcher.h"
+#endif
+
+/* RevEmu loader for cstrike.exe. Default: set up Steam and CreateProcess
+ * ProcName (hl.exe). With REVLOADER_STANDALONE: same Steam setup, then run
+ * GoldSrc in this process via hl's HlLauncher_Run (sources from -DHL_DIR). */
 
 #define STEAM_IPC_MAPPING_NAME "Local\\SteamStart_SharedMemFile"
 #define STEAM_IPC_EVENT_NAME   "Local\\SteamStart_SharedMemLock"
@@ -66,6 +66,46 @@ static void AppendArg(char *cmd, size_t cmdSize, const char *arg)
     }
     _snprintf(cmd + n, cmdSize - n, "%s", arg);
     cmd[cmdSize - 1] = '\0';
+}
+
+static int HasArg(const char *cmd, const char *arg)
+{
+    const char *p = cmd;
+    size_t n = strlen(arg);
+
+    while ((p = strstr(p, arg)) != NULL) {
+        if (p == cmd || p[-1] == ' ' || p[-1] == '\t') {
+            char end = p[n];
+            if (end == '\0' || end == ' ' || end == '\t') {
+                return 1;
+            }
+        }
+        p += n;
+    }
+    return 0;
+}
+
+static void AppendLaunchTail(char *cmd, size_t cmdSize, const char *procName)
+{
+    const char *rest = procName;
+
+    if (rest[0] == '"') {
+        rest = strchr(rest + 1, '"');
+        if (rest == NULL) {
+            return;
+        }
+        rest++;
+    } else {
+        while (*rest != '\0' && *rest != ' ' && *rest != '\t') {
+            rest++;
+        }
+    }
+    while (*rest == ' ' || *rest == '\t') {
+        rest++;
+    }
+    if (*rest != '\0') {
+        AppendArg(cmd, cmdSize, rest);
+    }
 }
 
 /* steam_api!SteamAPI_IsSteamRunning: OpenProcess(ActiveProcess\pid) and
@@ -259,15 +299,19 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
 
     if (procName[0] == '\0') {
         GetPrivateProfileStringA("Loader", "ProcName", "", procName, sizeof(procName), iniPath);
+#ifndef REVLOADER_STANDALONE
         if (procName[0] == '\0') {
             Fail("ProcName value not found on command line or in rev.ini. Please edit the file.");
             return 1;
         }
+#endif
     }
 
+#ifndef REVLOADER_STANDALONE
     if (extraArgs[0] != '\0') {
         AppendArg(procName, sizeof(procName), extraArgs);
     }
+#endif
 
     if (appId[0] == '\0' && !ReadSteamAppId(dir, appId, sizeof(appId))) {
         strncpy(appId, DEFAULT_STEAM_APPID, sizeof(appId) - 1);
@@ -314,6 +358,31 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
 
     WriteActiveProcess(GetCurrentProcessId(), steamClient);
 
+#ifdef REVLOADER_STANDALONE
+    {
+        char engineCmd[4096];
+        int rc;
+
+        _snprintf(engineCmd, sizeof(engineCmd), "%s", GetCommandLineA());
+        engineCmd[sizeof(engineCmd) - 1] = '\0';
+        if (procName[0] != '\0' && !HasArg(engineCmd, "-game")) {
+            AppendLaunchTail(engineCmd, sizeof(engineCmd), procName);
+        }
+        if (!HasArg(engineCmd, "-game")) {
+            AppendArg(engineCmd, sizeof(engineCmd), "-game cstrike");
+        }
+        rc = HlLauncher_Run(instance, engineCmd);
+        WriteSteamAppId(dir, appId);
+        TeardownSteamIpc(&ipc);
+        return rc;
+    }
+#else
+    if (procName[0] == '\0') {
+        Fail("ProcName value not found on command line or in rev.ini. Please edit the file.");
+        WriteSteamAppId(dir, appId);
+        TeardownSteamIpc(&ipc);
+        return 1;
+    }
     if (!RunChild(procName)) {
         WriteSteamAppId(dir, appId);
         TeardownSteamIpc(&ipc);
@@ -323,4 +392,5 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev, LPSTR cmd, int show)
     WriteSteamAppId(dir, appId);
     TeardownSteamIpc(&ipc);
     return 0;
+#endif
 }

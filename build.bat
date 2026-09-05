@@ -9,10 +9,25 @@ if errorlevel 1 (
     exit /b 1
 )
 
+set STANDALONE=OFF
+set "HL_DIR="
+if /I "%~1"=="standalone" (
+    set STANDALONE=ON
+    if "%~2"=="" (
+        set "HL_DIR=%~dp0..\hl"
+    ) else (
+        set "HL_DIR=%~2"
+    )
+)
+
 if not exist build mkdir build
 cd build
 
-cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl ..
+if "%STANDALONE%"=="ON" (
+    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=ON -DHL_DIR="%HL_DIR%" ..
+) else (
+    cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DREVLOADER_STANDALONE=OFF ..
+)
 if errorlevel 1 (
     echo CMake configure failed
     exit /b 1
@@ -26,7 +41,12 @@ if errorlevel 1 (
 
 cd ..
 
-set ROOT=..\
+set ROOT=.\
+if exist ..\hw.dll (
+    set ROOT=..\
+) else if exist ..\..\hw.dll (
+    set ROOT=..\..\
+)
 set CSTRIKE_ORIG=orig\cstrike.exe
 set CSTRIKE_DST=%ROOT%cstrike.exe
 
@@ -44,5 +64,9 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Build OK: revloader cstrike.exe -^> game root
+if "%STANDALONE%"=="ON" (
+    echo Build OK: standalone cstrike.exe ^(GoldSrc in-process, hl from %HL_DIR%^)
+) else (
+    echo Build OK: revloader cstrike.exe -^> game root
+)
 endlocal

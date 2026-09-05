@@ -4,11 +4,27 @@ project(revloader LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-# Temporary stand-in for this install's RevLoader cstrike.exe. Not part of
-# vellum; meant to be deleted once the overlay launcher takes over.
+option(REVLOADER_STANDALONE "Run GoldSrc in this process (compile hl launcher sources) instead of spawning hl.exe" OFF)
+set(HL_DIR "" CACHE PATH "Path to the hl launcher repository (required when REVLOADER_STANDALONE=ON)")
+
 add_executable(cstrike WIN32 src/main.cpp)
 target_link_libraries(cstrike PRIVATE advapi32 shell32 user32)
 target_compile_definitions(cstrike PRIVATE _CRT_SECURE_NO_WARNINGS)
+
+if(REVLOADER_STANDALONE)
+    if(HL_DIR STREQUAL "")
+        message(FATAL_ERROR "REVLOADER_STANDALONE=ON requires -DHL_DIR=/path/to/hl")
+    endif()
+    get_filename_component(HL_DIR "${HL_DIR}" ABSOLUTE)
+    if(NOT EXISTS "${HL_DIR}/src/launcher.cpp")
+        message(FATAL_ERROR "HL_DIR=${HL_DIR} does not contain src/launcher.cpp")
+    endif()
+    target_sources(cstrike PRIVATE "${HL_DIR}/src/launcher.cpp")
+    target_include_directories(cstrike PRIVATE "${HL_DIR}/src")
+    target_compile_definitions(cstrike PRIVATE REVLOADER_STANDALONE)
+    message(STATUS "revloader standalone: using hl sources from ${HL_DIR}")
+endif()
+
 if (MSVC)
     target_compile_options(cstrike PRIVATE /utf-8)
 endif()

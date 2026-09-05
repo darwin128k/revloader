@@ -1,40 +1,40 @@
 # revloader
 
-Замена `cstrike.exe` для No-Steam GoldSrc (RevEmu): сам процесс не является игрой. Он поднимает эмулятор Steam и запускает `hl.exe`.
+Замена `cstrike.exe` для No-Steam GoldSrc (RevEmu). Про внешние моды ничего не знает: либо поднимает Steam и запускает чужой `hl.exe`, либо при сборке `standalone` втягивает исходники репозитория `hl` и сама становится процессом игры.
 
-Исходный `cstrike.exe` в таких сборках — это RevLoader (2014), не стаб Valve. Игра живёт в `hl.exe` + `hw.dll`. Двойной клик по `hl.exe` без этого лоадера обычно падает на `SteamAPI_Init` (`Failed to initialize authentication interface`).
+## Режимы
 
-## Что делает
+**Загрузчик (по умолчанию).** Как RevLoader 2014: Steam IPC, `steam.dll` в этом процессе, `CreateProcess` на `ProcName` из `rev.ini` (обычно `hl.exe -game cstrike`), ждёт выхода `hl.exe`. Pid лоадера остаётся «живым Steam».
 
-1. Читает командную строку (`-launch`, `-appid`) и `rev.ini` (`[Loader] ProcName`, по умолчанию `hl.exe -game cstrike`).
-2. Берёт AppId из `-appid`, иначе `steam_appid.txt`, иначе `10`. Ставит `SteamAppId` / `SteamGameId` и **перезаписывает** `steam_appid.txt` до старта и после выхода: `hw.dll` удаляет файл, если env уже задан.
-3. Создаёт Steam IPC: `Local\SteamStart_SharedMemFile`, `Local\SteamStart_SharedMemLock`.
-4. Грузит `steam.dll` **в процесс лоадера** (x86).
-5. Пишет `HKCU\Software\Valve\Steam\ActiveProcess`: живой `pid` лоадера и путь к `steamclient.dll` (интерфейс `SteamClient012`).
-6. `CreateProcess` на ProcName и ждёт, пока `hl.exe` не завершится.
-
-Лоадер должен оставаться запущенным, пока идёт игра: `steam_api` считает Steam живым, пока pid в реестре — существующий процесс.
+**Standalone.** Тот же Steam, затем `HlLauncher_Run` из репозитория `hl` в этом же процессе. Отдельный `hl.exe` не нужен.
 
 ## Сборка
 
-32-bit MSVC (у `steam.dll` нет x64).
+32-bit MSVC.
+
+Загрузчик:
 
 ```bat
-revloader\build.bat
+build.bat
 ```
 
-Нужны Visual Studio 2022 (vcvars32), CMake и Ninja. Скрипт кладёт `cstrike.exe` в родительскую папку (корень игры) и один раз копирует прежний exe в `orig\`.
-
-Сборка руками:
+Standalone (путь к `hl` по умолчанию `..\hl`):
 
 ```bat
-cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -B build
+build.bat standalone
+build.bat standalone D:\src\hl
+```
+
+CMake:
+
+```bat
+cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DREVLOADER_STANDALONE=ON -DHL_DIR=C:/src/hl -B build
 cmake --build build
 ```
 
-## Запуск
+Скрипт кладёт `cstrike.exe` в корень игры (ищет `hw.dll` на уровень или два выше).
 
-Из корня игры, рядом с `hl.exe`, `steam.dll`, `steamclient.dll`, `rev.ini`, `steam_appid.txt`:
+## Запуск
 
 ```bat
 cstrike.exe
