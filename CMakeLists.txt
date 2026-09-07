@@ -8,7 +8,9 @@ enable_language(RC)
 
 option(REVLOADER_STANDALONE "Run GoldSrc in this process (compile hl launcher sources) instead of spawning hl.exe" OFF)
 option(REVLOADER_LAUNCHER_DLLS "Forward rev.ini [Loader] Dlls= as -dll flags" ON)
+option(HL_METAHHOOK "Embed MetaHookSv in the standalone launcher" OFF)
 set(HL_DIR "" CACHE PATH "Path to the hl launcher repository (required when REVLOADER_STANDALONE=ON)")
+set(METAHOOK_DIR "" CACHE PATH "Path to MetaHookSv (default: HL_DIR/../metahook)")
 
 add_executable(cstrike WIN32 src/main.cpp)
 
@@ -37,6 +39,13 @@ if(REVLOADER_STANDALONE)
     target_include_directories(cstrike PRIVATE "${HL_DIR}/src")
     target_compile_definitions(cstrike PRIVATE REVLOADER_STANDALONE)
     message(STATUS "revloader standalone: using hl sources from ${HL_DIR}")
+    if(HL_METAHHOOK)
+        if(METAHOOK_DIR STREQUAL "")
+            set(METAHOOK_DIR "${HL_DIR}/../metahook")
+        endif()
+        include("${HL_DIR}/cmake/MetaHookEmbed.cmake")
+        hl_embed_metahook(cstrike "${METAHOOK_DIR}")
+    endif()
 endif()
 
 if(REVLOADER_LAUNCHER_DLLS)
